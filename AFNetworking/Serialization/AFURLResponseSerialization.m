@@ -31,11 +31,14 @@ return underlyingError;
     return [[NSError alloc] initWithDomain:error.domain code:error.code userInfo:mutableUserInfo];
 }
 
+
 static BOOL AFErrorOrUnderlyingErrorHasCodeInDomain(NSError *error, NSInteger code, NSString *domain) {
+    //判断错误域名和传过来的域名是否一致，错误code是否一致
     if ([error.domain isEqualToString:domain] && error.code == code) {
         return YES;
     } else if (error.userInfo[NSUnderlyingErrorKey]) {
         return AFErrorOrUnderlyingErrorHasCodeInDomain(error.userInfo[NSUnderlyingErrorKey], code, domain);
+        // 递归
     }
 
     return NO;
@@ -84,8 +87,9 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
     return self;
 }
 
-#pragma mark -
 
+#pragma mark -
+// 判断是不是 可接受类型和可接受code，    不是则填充error
 - (BOOL)validateResponse:(NSHTTPURLResponse *)response
                     data:(NSData *)data
                    error:(NSError * __autoreleasing *)error
@@ -94,8 +98,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
     NSError *validationError = nil;
 
     if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
-        if (self.acceptableContentTypes && ![self.acceptableContentTypes containsObject:[response MIMEType]] &&
-            !([response MIMEType] == nil && [data length] == 0)) {
+        if (self.acceptableContentTypes && ![self.acceptableContentTypes containsObject:[response MIMEType]] &&!([response MIMEType] == nil && [data length] == 0)) {
 
             if ([data length] > 0 && [response URL]) {
                 NSMutableDictionary *mutableUserInfo = [@{
@@ -108,10 +111,10 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
                 }
 
                 validationError = AFErrorWithUnderlyingError([NSError errorWithDomain:AFURLResponseSerializationErrorDomain code:NSURLErrorCannotDecodeContentData userInfo:mutableUserInfo], validationError);
-            }
+            }//if ([data length] > 0 && [response URL])
 
             responseIsValid = NO;
-        }
+        }//if (self.acceptableContentTypes && ![self.acceptableContentTypes containsObject:[response MIMEType]] &&
 
         if (self.acceptableStatusCodes && ![self.acceptableStatusCodes containsIndex:(NSUInteger)response.statusCode] && [response URL]) {
             NSMutableDictionary *mutableUserInfo = [@{
@@ -127,18 +130,18 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
             validationError = AFErrorWithUnderlyingError([NSError errorWithDomain:AFURLResponseSerializationErrorDomain code:NSURLErrorBadServerResponse userInfo:mutableUserInfo], validationError);
 
             responseIsValid = NO;
-        }
-    }
+        }//if (self.acceptableStatusCodes && ![self.acceptableStatusCodes containsIndex:(NSUInteger)response
+    }//if (response && [response isKindOfClass:[NSHTTPURLResponse class]])
 
-    if (error && !responseIsValid) {
+    if(error && !responseIsValid) {
         *error = validationError;
     }
 
     return responseIsValid;
 }
 
-#pragma mark - AFURLResponseSerialization
-
+#pragma mark -       AFHTTPResponseSerializer
+//AFURLResponseSerialization
 - (id)responseObjectForResponse:(NSURLResponse *)response
                            data:(NSData *)data
                           error:(NSError *__autoreleasing *)error
@@ -209,13 +212,17 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
     return self;
 }
 
-#pragma mark - AFURLResponseSerialization
+#pragma mark - AFJSONResponseSerializer
+//AFURLResponseSerialization
 
 - (id)responseObjectForResponse:(NSURLResponse *)response
                            data:(NSData *)data
                           error:(NSError *__autoreleasing *)error
 {
+    //  先判断是不是可接受类型和可接受code
     if (![self validateResponse:(NSHTTPURLResponse *)response data:data error:error]) {
+        //error为空，或者有错误，去函数里判断。
+        // 函数 1
         if (!error || AFErrorOrUnderlyingErrorHasCodeInDomain(*error, NSURLErrorCannotDecodeContentData, AFURLResponseSerializationErrorDomain)) {
             return nil;
         }
@@ -236,12 +243,14 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
     if (!responseObject)
     {
         if (error) {
+            // 函数 2，大涂 最后讲
             *error = AFErrorWithUnderlyingError(serializationError, *error);
         }
         return nil;
     }
     
     if (self.removesKeysWithNullValues) {
+        // 函数 3， 有递归
         return AFJSONObjectByRemovingKeysWithNullValues(responseObject, self.readingOptions);
     }
 

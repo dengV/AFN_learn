@@ -126,6 +126,16 @@
     __block NSURL *downloadFilePath = nil;
     XCTestExpectation *expectation = [self expectationWithDescription:@"Request should succeed"];
 
+    
+    
+    
+/*
+ 之前的NSUrlSession代理和这里都移动了文件到下载路径，而NSUrlSession代理的下载路径是所有request公用的下载路径，一旦设置，所有的request都会下载到之前那个路径。
+ 而这个是对应的每个task的，每个task可以设置各自下载路径,还记得AFHttpManager的download方法么
+ 
+ 
+ 
+ */
     [self.manager setDownloadTaskDidFinishDownloadingBlock:^NSURL *(NSURLSession *session, NSURLSessionDownloadTask *downloadTask, NSURL *location) {
         managerDownloadFinishedBlockExecuted = YES;
         NSURL *dirURL  = [[[NSFileManager defaultManager] URLsForDirectory:NSLibraryDirectory inDomains:NSUserDomainMask] lastObject];

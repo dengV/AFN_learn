@@ -175,7 +175,19 @@ NS_ASSUME_NONNULL_BEGIN
 
  @param request The HTTP request for the request.
  @param downloadProgressBlock A block object to be executed when the download progress is updated. Note this block is called on the session queue, not the main queue.
+ 
+  Note this block is called on the session queue, not the main queue.
+ 
+ 
  @param destination A block object to be executed in order to determine the destination of the downloaded file. This block takes two arguments, the target path & the server response, and returns the desired file URL of the resulting download. The temporary file used during the download will be automatically deleted after being moved to the returned URL.
+ 
+ 
+ 
+  The temporary file used during the download will be automatically deleted after being moved to the returned URL.
+ 
+ COOL
+ 
+ 
  @param completionHandler A block to be executed when a task finishes. This block has no return value and takes three arguments: the server response, the path of the downloaded file, and the error describing the network or parsing error that occurred, if any.
 
  @warning If using a background `NSURLSessionConfiguration` on iOS, these blocks will be lost when the app is terminated. Background sessions may prefer to use `-setDownloadTaskDidFinishDownloadingBlock:` to specify the URL for saving the downloaded file, rather than the destination block of this method.
@@ -308,6 +320,14 @@ NS_ASSUME_NONNULL_BEGIN
  @param block A block object to be executed to determine the caching behavior of a data task. The block returns the response to cache, and takes three arguments: the session, the data task, and the proposed cached URL response.
  */
 - (void)setDataTaskWillCacheResponseBlock:(nullable NSCachedURLResponse * (^)(NSURLSession *session, NSURLSessionDataTask *dataTask, NSCachedURLResponse *proposedResponse))block;
+/*
+    隐藏 属性， 使用 方法 ，操作 属性， 很OO
+ */
+
+
+
+
+
 
 /**
  Sets a block to be executed once all messages enqueued for a session have been delivered, as handled by the `NSURLSessionDataDelegate` method `URLSessionDidFinishEventsForBackgroundURLSession:`.

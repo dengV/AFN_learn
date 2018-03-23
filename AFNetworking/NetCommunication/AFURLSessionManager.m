@@ -120,6 +120,8 @@ typedef void (^AFURLSessionDownloadTaskDidResumeBlock)(NSURLSession *session, NS
 @property (readwrite, nonatomic, copy) AFURLSessionDataTaskDidReceiveDataBlock dataTaskDidReceiveData;
 @property (readwrite, nonatomic, copy) AFURLSessionDataTaskWillCacheResponseBlock dataTaskWillCacheResponse;
 @property (readwrite, nonatomic, copy) AFURLSessionDownloadTaskDidFinishDownloadingBlock downloadTaskDidFinishDownloading;
+//返回一个 NSURL
+
 @property (readwrite, nonatomic, copy) AFURLSessionDownloadTaskDidWriteDataBlock downloadTaskDidWriteData;
 @property (readwrite, nonatomic, copy) AFURLSessionDownloadTaskDidResumeBlock downloadTaskDidResume;
 
@@ -215,7 +217,7 @@ typedef void (^AFURLSessionDownloadTaskDidResumeBlock)(NSURLSession *session, NS
     }
 }
 
-#pragma mark -
+#pragma mark - 取 delegate
 
 - (AFURLSessionManagerTaskDelegate *)delegateForTask:(NSURLSessionTask *)task {
     NSParameterAssert(task);
@@ -288,17 +290,31 @@ typedef void (^AFURLSessionDownloadTaskDidResumeBlock)(NSURLSession *session, NS
     delegate.completionHandler = completionHandler;
 
     if (destination) {
+/*
+ 
+ //有点绕，就是把一个block赋值给我们代理的downloadTaskDidFinishDownloading，这个Block里的内部返回也是调用Block去获取到的，这里面的参数都是AF代理传过去的。
+ */
         delegate.downloadTaskDidFinishDownloading = ^NSURL * (NSURLSession * __unused session, NSURLSessionDownloadTask *task, NSURL *location) {
             return destination(location, task.response);
         };
     }
-
+// 默认操作
     downloadTask.taskDescription = self.taskDescriptionForSessionTasks;
 
     [self setDelegate:delegate forTask:downloadTask];
 
     delegate.downloadProgressBlock = downloadProgressBlock;
 }
+/*
+ 清楚的可以看到地址被赋值给AF的Block了。
+ 
+ 至此AF的代理也讲完了，数据或错误信息随着AF代理成功失败回调，回到了用户的手中。
+ 
+
+ 
+ */
+
+
 
 - (void)removeDelegateForTask:(NSURLSessionTask *)task {
     NSParameterAssert(task);
@@ -306,6 +322,7 @@ typedef void (^AFURLSessionDownloadTaskDidResumeBlock)(NSURLSession *session, NS
     [self.lock lock];
     [self removeNotificationObserverForTask:task];
     [self.mutableTaskDelegatesKeyedByTaskIdentifier removeObjectForKey:@(task.taskIdentifier)];
+    // 移除 通知
     [self.lock unlock];
 }
 
@@ -463,7 +480,7 @@ typedef void (^AFURLSessionDownloadTaskDidResumeBlock)(NSURLSession *session, NS
 {
     __block NSURLSessionDownloadTask *downloadTask = nil;
     url_session_manager_create_task_safely(^{
-        downloadTask = [self.session downloadTaskWithRequest:request];
+        downloadTask = [self.session downloadTaskWithRequest: request];
     });
 
     [self addDelegateForDownloadTask:downloadTask progress:downloadProgressBlock destination:destination completionHandler:completionHandler];
@@ -718,7 +735,7 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
     }
 }
 
-#pragma mark - Custom Delegate 0
+#pragma mark - Custom Delegate 0/  Page 2 + 0
 - (void)URLSession:(NSURLSession *)session
               task:(NSURLSessionTask *)task
 didCompleteWithError:(NSError *)error
@@ -728,7 +745,7 @@ didCompleteWithError:(NSError *)error
     // delegate may be nil when completing a task in the background
     if (delegate) {
         [delegate URLSession:session task:task didCompleteWithError:error];
-
+//  不可能 调用 自己 撒
         [self removeDelegateForTask:task];
     }
 
@@ -737,7 +754,8 @@ didCompleteWithError:(NSError *)error
     }
 }
 
-#pragma mark - NSURLSessionDataDelegate
+
+#pragma mark - NSURLSessionDataDelegate，    代理9： /  Page 2 + 1
 
 - (void)URLSession:(NSURLSession *)session
           dataTask:(NSURLSessionDataTask *)dataTask
@@ -748,6 +766,7 @@ didReceiveResponse:(NSURLResponse *)response
 
     if (self.dataTaskDidReceiveResponse) {
         disposition = self.dataTaskDidReceiveResponse(session, dataTask, response);
+        // 覆写
     }
 
     if (completionHandler) {
@@ -755,6 +774,10 @@ didReceiveResponse:(NSURLResponse *)response
     }
 }
 
+
+
+#pragma mark - NSURLSessionDataDelegate，    代理10： /  Page 2 + 2
+//上面的代理如果设置为NSURLSessionResponseBecomeDownload，则会调用这个方法
 - (void)URLSession:(NSURLSession *)session
           dataTask:(NSURLSessionDataTask *)dataTask
 didBecomeDownloadTask:(NSURLSessionDownloadTask *)downloadTask
@@ -763,6 +786,7 @@ didBecomeDownloadTask:(NSURLSessionDownloadTask *)downloadTask
     if (delegate) {
         [self removeDelegateForTask:dataTask];
         [self setDelegate:delegate forTask:downloadTask];
+        // 切换
     }
 
     if (self.dataTaskDidBecomeDownloadTask) {
@@ -770,20 +794,42 @@ didBecomeDownloadTask:(NSURLSessionDownloadTask *)downloadTask
     }
 }
 
-#pragma mark - Custom Delegate 1
+
+#pragma mark - 代理11：/  Page 2 + 3
+
+//当我们获取到数据就会调用，会被反复调用，请求到的数据就在这被拼装完整
+
+
+//。 #pragma mark - Custom Delegate 1   ，        看错了吧
 - (void)URLSession:(NSURLSession *)session
           dataTask:(NSURLSessionDataTask *)dataTask
     didReceiveData:(NSData *)data
 {
-
     AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:dataTask];
     [delegate URLSession:session dataTask:dataTask didReceiveData:data];
-
+//  不可能 调用 自己 撒
+    // 代理 转发， 系统代理 转  AFURLSessionManagerTaskDelegate，
+    // 为什么 要 多封装一层 AFURLSessionManagerTaskDelegate？
     if (self.dataTaskDidReceiveData) {
         self.dataTaskDidReceiveData(session, dataTask, data);
     }
 }
+/*
+ 
+ 这个方法和上面didCompleteWithError算是NSUrlSession的代理中最重要的两个方法了。
+ 我们转发了这个方法到AF的代理中去，所以数据的拼接都是在AF的代理中进行的。这也是情理中的，毕竟每个响应数据都是对应各个task，各个AF代理的。在AFURLSessionManager都只是做一些公共的处理。
+ */
 
+#pragma mark - 代理12：/  Page 2 + 3
+
+/*当task接收到所有期望的数据后，session会调用此代理方法。
+ */
+/* Invoke the completion routine with a valid NSCachedURLResponse to
+* allow the resulting data to be cached, or pass nil to prevent
+* caching. Note that there is no guarantee that caching will be
+* attempted for a given resource, and you should not rely on this
+* message to receive the resource data.
+*/
 - (void)URLSession:(NSURLSession *)session
           dataTask:(NSURLSessionDataTask *)dataTask
  willCacheResponse:(NSCachedURLResponse *)proposedResponse
@@ -800,6 +846,38 @@ didBecomeDownloadTask:(NSURLSessionDownloadTask *)downloadTask
     }
 }
 
+/*
+ Instance Method
+ urlSession(_:dataTask:willCacheResponse:completionHandler:)
+ https://developer.apple.com/documentation/foundation/urlsessiondatadelegate/1411612-urlsession
+ */
+/*
+ 函数作用：
+ 询问data task或上传任务（upload task）是否缓存response。
+ 
+ Discussion
+ The session calls this delegate method after the task finishes receiving all of the expected data. If you do not implement this method, the default behavior is to use the caching policy specified in the session’s configuration object. The primary purpose of this method is to prevent caching of specific URLs or to modify the userInfo dictionary associated with the URL response.
+ 
+ This method is called only if the URLProtocol handling the request decides to cache the response. As a rule, responses are cached only when all of the following are true:
+ 
+ The request is for an HTTP or HTTPS URL (or your own custom networking protocol that supports caching).
+ 
+ The request was successful (with a status code in the 200–299 range).
+ 
+ The provided response came from the server, rather than out of the cache.
+ 
+ The session configuration’s cache policy allows caching.
+ 
+ The provided NSURLRequest object's cache policy (if applicable) allows caching.
+ 
+ The cache-related headers in the server’s response (if present) allow caching.
+ 
+ The response size is small enough to reasonably fit within the cache. (For example, if you provide a disk cache, the response must be no larger than about 5% of the disk cache size.)
+ 
+ 
+ */
+#pragma mark - 代理
+
 - (void)URLSessionDidFinishEventsForBackgroundURLSession:(NSURLSession *)session {
     if (self.didFinishEventsForBackgroundURLSession) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -809,31 +887,48 @@ didBecomeDownloadTask:(NSURLSessionDownloadTask *)downloadTask
 }
 
 #pragma mark - NSURLSessionDownloadDelegate
-#pragma mark - Custom Delegate 2
+//。 #pragma mark - Custom Delegate 2  ， 看错了
+
+#pragma mark - 代理13：/  Page 2 + 4
+
 - (void)URLSession:(NSURLSession *)session
       downloadTask:(NSURLSessionDownloadTask *)downloadTask
 didFinishDownloadingToURL:(NSURL *)location
 {
     AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:downloadTask];
     if (self.downloadTaskDidFinishDownloading) {
+          //调用自定义的block拿到文件存储的地址
         NSURL *fileURL = self.downloadTaskDidFinishDownloading(session, downloadTask, location);
+/*
+ - (void)setDownloadTaskDidFinishDownloadingBlock:(NSURL * (^)(NSURLSession *session, NSURLSessionDownloadTask *downloadTask, NSURL *location))block {
+ self.downloadTaskDidFinishDownloading = block;
+ }
+ */
         if (fileURL) {
             delegate.downloadFileURL = fileURL;
             NSError *error = nil;
-            
             if (![[NSFileManager defaultManager] moveItemAtURL:location toURL:fileURL error:&error]) {
                 [[NSNotificationCenter defaultCenter] postNotificationName:AFURLSessionDownloadTaskDidFailToMoveFileNotification object:downloadTask userInfo:error.userInfo];
+                // 有问题， 就发通知
             }
-
             return;
         }
     }
-
+    // 上面 是 手动(user)处理， 下面是 默认处理
     if (delegate) {
         [delegate URLSession:session downloadTask:downloadTask didFinishDownloadingToURL:location];
+        // 消息 转发， 调用 方法
     }
 }
 
+
+/*
+ 
+ bytesWritten 表示自上次调用该方法后，接收到的数据字节数
+ totalBytesWritten表示目前已经接收到的数据字节数
+ totalBytesExpectedToWrite 表示期望收到的文件总字节数，是由Content-Length header提供。如果没有提供，默认是NSURLSessionTransferSizeUnknown。
+ 
+ */
 - (void)URLSession:(NSURLSession *)session
       downloadTask:(NSURLSessionDownloadTask *)downloadTask
       didWriteData:(int64_t)bytesWritten
@@ -852,6 +947,31 @@ totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite
     }
 }
 
+/*
+ URLSessionDownloadDelegate
+ The NSURLSessionDownloadDelegate protocol defines delegate methods that you should implement when using URLSession download tasks.
+ 
+ 
+ Parameters
+ session
+ The session containing the download task.
+ 
+ downloadTask
+ The download task.
+ 
+ bytesWritten
+ The number of bytes transferred since the last time this delegate method was called.
+ 
+ totalBytesWritten
+ The total number of bytes transferred so far.
+ 
+ totalBytesExpectedToWrite
+ The expected length of the file, as provided by the Content-Length header. If this header was not provided, the value is NSURLSessionTransferSizeUnknown.
+ 
+ 
+ https://developer.apple.com/documentation/foundation/urlsessiondownloaddelegate/1409408-urlsession
+ */
+
 - (void)URLSession:(NSURLSession *)session
       downloadTask:(NSURLSessionDownloadTask *)downloadTask
  didResumeAtOffset:(int64_t)fileOffset
@@ -868,6 +988,41 @@ expectedTotalBytes:(int64_t)expectedTotalBytes
         self.downloadTaskDidResume(session, downloadTask, fileOffset, expectedTotalBytes);
     }
 }
+/*
+ 
+ urlSession(_:downloadTask:didResumeAtOffset:expectedTotalBytes:)
+ Tells the delegate that the download task has resumed downloading.
+ 
+ Parameters
+ session
+ The session containing the download task that finished.
+ 
+ downloadTask
+ The download task that resumed. See explanation in the discussion.
+ 
+ fileOffset
+ If the file's cache policy or last modified date prevents reuse of the existing content, then this value is zero. Otherwise, this value is an integer representing the number of bytes on disk that do not need to be retrieved again.
+ 
+ Note
+ 
+ In some situations, it may be possible for the transfer to resume earlier in the file than where the previous transfer ended.
+ 
+ expectedTotalBytes
+ The expected length of the file, as provided by the Content-Length header. If this header was not provided, the value is NSURLSessionTransferSizeUnknown.
+ 
+ 
+ 
+ 其实这个就是用来做断点续传的代理方法。可以在下载失败的时候，拿到我们失败的拼接的部分resumeData，然后用去调用downloadTaskWithResumeData：就会调用到这个代理方法来了。
+ 其中注意：fileOffset这个参数，如果文件缓存策略或者最后文件更新日期阻止重用已经存在的文件内容，那么该值为0。否则，该值表示当前已经下载data的偏移量。
+ 方法中仅仅调用了downloadTaskDidResume自定义Block。
+ 至此NSUrlSesssion的delegate讲完了。大概总结下：
+ 
+ 每个代理方法对应一个我们自定义的Block,如果Block被赋值了，那么就调用它。
+ 在这些代理方法里，我们做的处理都是相对于这个sessionManager所有的request的。是公用的处理。
+ 转发了3个代理方法到AF的deleagate中去了，AF中的deleagate是需要对应每个task去私有化处理的。
+ 
+ */
+
 
 #pragma mark - NSSecureCoding
 

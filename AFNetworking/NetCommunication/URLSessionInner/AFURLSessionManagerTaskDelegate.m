@@ -20,6 +20,17 @@ static dispatch_queue_t url_session_manager_processing_queue() {
     
     return af_url_session_manager_processing_queue;
 }
+/*
+ 
+ AFN 的 最大并发 是多少？
+ 
+ 
+ 回调 好像只有一个
+ */
+
+
+
+
 
 static dispatch_group_t url_session_manager_completion_group() {
     static dispatch_group_t af_url_session_manager_completion_group;
@@ -27,9 +38,13 @@ static dispatch_group_t url_session_manager_completion_group() {
     dispatch_once(&onceToken, ^{
         af_url_session_manager_completion_group = dispatch_group_create();
     });
-    
     return af_url_session_manager_completion_group;
 }
+/*
+ 和主队列回调。AF没有用这个GCD组做任何处理，只是提供这个接口，让我们有需求的自行调用处理。如果有对多个任务完成度的监听，可以自行处理。
+ 而队列的话，如果你不需要回调主线程，可以自己设置一个回调队列。
+ 
+ */
 
 
 
@@ -101,24 +116,28 @@ static dispatch_group_t url_session_manager_completion_group() {
 }
 
 #pragma mark - NSURLSessionTaskDelegate
-
+#pragma mark - Custom Delegate 0/  Page 2 + 0 , 当作 方法调用
 - (void)URLSession:(__unused NSURLSession *)session
               task:(NSURLSessionTask *)task
 didCompleteWithError:(NSError *)error
 {
-    __strong AFURLSessionManager *manager = self.manager;
+    __strong AFURLSessionManager *manager = self.manager; // Cool , 不用 type of 的
     
     __block id responseObject = nil;
     
     __block NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+    // 生成了一个存储这个task相关信息的字典：userInfo，这个字典是用来作为发送任务完成的通知的参数。
     userInfo[AFNetworkingTaskDidCompleteResponseSerializerKey] = manager.responseSerializer;
     
     //Performance Improvement from #2672
     NSData *data = nil;
+    
     if (self.mutableData) {
         data = [self.mutableData copy];
         //We no longer need the reference, so nil it out to gain back some memory.
         self.mutableData = nil;
+        //注意这行代码的用法，感觉写的很Nice...把请求到的数据data传出去，然后就不要这个值了释放内存
+        // 下载 拼接 的 data 可能 很大
     }
     
     if (self.downloadFileURL) {
@@ -139,11 +158,18 @@ didCompleteWithError:(NSError *)error
                 [[NSNotificationCenter defaultCenter] postNotificationName:AFNetworkingTaskDidCompleteNotification object:task userInfo:userInfo];
             });
         });
-    } else {
+    }
+    else {
+/*
+ 如果成功则在一个AF的并行queue中，去做数据解析等后续操作：
+ 
+ */
         dispatch_async(url_session_manager_processing_queue(), ^{
             NSError *serializationError = nil;
             responseObject = [manager.responseSerializer responseObjectForResponse:task.response data:data error:&serializationError];
-            
+/*
+ @protocol    AFURLResponseSerialization
+ */
             if (self.downloadFileURL) {
                 responseObject = self.downloadFileURL;
             }
@@ -163,6 +189,20 @@ didCompleteWithError:(NSError *)error
                 
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [[NSNotificationCenter defaultCenter] postNotificationName:AFNetworkingTaskDidCompleteNotification object:task userInfo:userInfo];
+/*
+ 回到主线程，发送了任务完成的通知：
+ 
+ /
+ 
+ AFN 提供了 相关实现
+ 
+ - (void)networkRequestDidFinish:(NSNotification *)notification {
+ 
+ */
+                    
+                    
+                    
+                    // 消息 转发
                 });
             });
         });
@@ -181,6 +221,8 @@ didCompleteWithError:(NSError *)error
     [self.mutableData appendData:data];
 }
 
+
+
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
    didSendBodyData:(int64_t)bytesSent
     totalBytesSent:(int64_t)totalBytesSent
@@ -191,7 +233,10 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend{
 }
 
 #pragma mark - NSURLSessionDownloadDelegate
-
+/*
+ 
+ 
+ */
 - (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask
       didWriteData:(int64_t)bytesWritten
  totalBytesWritten:(int64_t)totalBytesWritten
@@ -209,17 +254,22 @@ expectedTotalBytes:(int64_t)expectedTotalBytes{
     self.downloadProgress.completedUnitCount = fileOffset;
 }
 
+
+//
+
 - (void)URLSession:(NSURLSession *)session
       downloadTask:(NSURLSessionDownloadTask *)downloadTask
 didFinishDownloadingToURL:(NSURL *)location
 {
     self.downloadFileURL = nil;
-    
+     //   AF代理的自定义Block
     if (self.downloadTaskDidFinishDownloading) {
         self.downloadFileURL = self.downloadTaskDidFinishDownloading(session, downloadTask, location);
         if (self.downloadFileURL) {
             NSError *fileManagerError = nil;
-            
+/*
+ 而这个是对应的每个task的，每个task可以设置各自下载路径,还记得AFHttpManager的download方法么
+ */
             if (![[NSFileManager defaultManager] moveItemAtURL:location toURL:self.downloadFileURL error:&fileManagerError]) {
                 [[NSNotificationCenter defaultCenter] postNotificationName:AFURLSessionDownloadTaskDidFailToMoveFileNotification object:downloadTask userInfo:fileManagerError.userInfo];
             }
